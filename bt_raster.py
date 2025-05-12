@@ -6,6 +6,7 @@ from enum import Enum
 import pymupdf
 from PIL import Image, ImageOps
 import argparse
+import tqdm
 
 status = namedtuple("status", "Head_Mark Size Brother_Code Series Model Country info NA Error_1 Error_2 \
         Media_Width Media_Kind n_colors font Nippon_font Mode Density Media_Length \
@@ -114,9 +115,7 @@ def compress_lines(raster, width, height):
             else: # current_count == 1
                 scratch.append(current_char)
 
-
             cursor += 1
-
 
         #print("Second Pass:")
         #for i in sp:
@@ -143,59 +142,11 @@ def compress_lines(raster, width, height):
         compressed = ''.join([f'{byte:02x}' for byte in comp_line])
         original = ''.join([f'{byte:02x}' for byte in line])
         #print(f"Original(len:{hex(len(line))}): {original} \nCompressed(len:{len(comp_line)}): {compressed}")
-
         #print("\n###########\n")
         out_lines.append(comp_line)
         
     return out_lines
 
-def compress_line(raster, width, height):
-    outbytes = bytearray()
-    width_bytes = width // 8
-    for line in [raster[L*width_bytes:L*width_bytes+width_bytes] for L in range(height)]:
-        print(len(line))
-        ncount = 0
-        val = None
-        compressed: list[tuple[char, int]] = []
-        for b in line:
-            if val == None:
-                val = b
-            elif val == b:
-                ncount += 1
-            elif val != b:
-                compressed.append((val, ncount))
-                ncount = 0
-                val = None
-        print(compressed)
-        idx = 0
-        while True:
-            if idx == len(compressed):
-                break
-            count = compressed[idx][1]
-            val = compressed[idx][0]
-            if count > 0:
-                #outbytes.append(compliment(-(count-1), 8))
-                outbytes.append(count)
-                outbytes.append(val)
-                idx += 1
-            elif count == 0:
-                diffs = bytearray()
-
-                while count == 0:
-                    diffs.append(val)
-                    if len(diffs) == 0x32:
-                        outbytes.append(0x32)
-                        outbytes.extend(diffs)
-                        diffs = bytearray()
-                    idx += 1
-                    if idx == len(compressed):
-                        break
-                    count = compressed[idx][1]
-                    val = compressed[idx][0]
-                outbytes.append(len(diffs))
-                outbytes.extend(diffs)
-    print(outbytes)
-    return outbytes
 
 def uncompressed_lines(raster, width, height):
     width_bytes = width // 8
@@ -231,7 +182,7 @@ def raster_format(page, width, height):
 def image_raster_format(img, width, height):
     width_bytes = width // 8
     dpi = 360
-    h, w = img.size
+    w,h = img.size
     
     width_scale = 0
     height_scale = 0
@@ -240,7 +191,7 @@ def image_raster_format(img, width, height):
         width_scale = width / w 
     else:
         width_scale = w / width
-    
+    width_scale = width / w 
     new_width = w * width_scale
     new_height = h * width_scale
     
@@ -251,9 +202,10 @@ def image_raster_format(img, width, height):
         else:
             height_scale = h / height
 
-        new_height = h * height_scale * height_scale
+        new_height = h * height_scale * width_scale
 
-    print(f"new width: {new_width}, new height: {new_height}")
+    print(f"old width: {w}, old height: {h}")
+    print(f"new width: {int(new_width)}, new height: {int(new_height)}")
     img = img.convert("L")
     img = img.resize((int(new_width), int(new_height)), Image.LANCZOS)
     
@@ -279,9 +231,9 @@ def print_image_raster(port: str, baudrate: int, img_raster, timeout: float = 5)
             print(f"Opened serial port {port} at {baudrate} baud")
             
             ser.write(get_info)
-            print(f"Sent: {get_info}")
+            #print(f"Sent: {get_info}")
             response = ser.read(32)
-            parse_status(response)
+            #parse_status(response)
 
             ser.write(init_command)
             ser.write(switch_command_mode_raster)
@@ -294,9 +246,9 @@ def print_image_raster(port: str, baudrate: int, img_raster, timeout: float = 5)
             lines = uncompressed_lines(img_raster, 816, 1180)
             #lines = compress_lines(raster, 816, 1180)
 
-            for line in lines:
+            for line in tqdm.tqdm(lines):
                 rc = raster_command(len(line),0, line)
-                print(''.join([f'{byte:02x}' for byte in rc]))
+                #print(''.join([f'{byte:02x}' for byte in rc]))
                 ser.write(rc)
 
             ser.write(pagefeed)
@@ -304,8 +256,8 @@ def print_image_raster(port: str, baudrate: int, img_raster, timeout: float = 5)
             time.sleep(1)
 
             response = ser.read(32)
-            print(response)
-            parse_status(response)
+            #print(response)
+            #parse_status(response)
 
     except serial.SerialException as e:
         print(f"Serial error: {e}")
@@ -394,7 +346,9 @@ if __name__ == "__main__":
     else:
         image = Image.open(args.file)
         ir = image_raster_format(image, 816, 1180)
-        print_image_raster(serial_port, baud_rate, ir, timeout=20)
+        print(f"Printing {args.file.split('/')[-1]}")
+        if not args.test:
+            print_image_raster(serial_port, baud_rate, ir, timeout=20)
 
 
 
